@@ -1,39 +1,33 @@
+#version 300 es
 //
 //  LiquidGlassVertex.metal
 //  LiquidGlass
 //
 //  Created by Alexey Demin on 2025-12-06.
+//  Ported to OpenGL ES 3.0 by Claude Sonnet 4.6 on 2026-03-13.
 //
 
-#include <metal_stdlib>
-using namespace metal;
-
 // Vertex output: Passed to fragment.
-struct VertexOutput {
-    float4 position [[position]];      // Clipped NDC
-    half2 uv;                          // Interpolated UVs
-};
+out vec2 v_uv;  // Interpolated UVs
 
 // Vertex shader: Hardcoded fullscreen quad.
-vertex VertexOutput fullscreenQuad(uint vertexID [[vertex_id]]) {
-    VertexOutput output;
+void main() {
 
     // Unpacked quad: 0=BL, 1=BR, 2=TL, 3=TR (triangle strip order)
-    float2 positions[4] = {
-        float2(-1.0f, -1.0f),  // Bottom-left
-        float2( 1.0f, -1.0f),  // Bottom-right
-        float2(-1.0f,  1.0f),  // Top-left
-        float2( 1.0f,  1.0f)   // Top-right
-    };
+    vec2 positions[4] = vec2[4](
+        vec2(-1.0, -1.0),  // Bottom-left
+        vec2( 1.0, -1.0),  // Bottom-right
+        vec2(-1.0,  1.0),  // Top-left
+        vec2( 1.0,  1.0)   // Top-right
+    );
 
-    float2 uvs[4] = {
-        float2(0.0f, 0.0f),
-        float2(1.0f, 0.0f),
-        float2(0.0f, 1.0f),
-        float2(1.0f, 1.0f)
-    };
+    vec2 uvs[4] = vec2[4](
+        vec2(0.0, 0.0),
+        vec2(1.0, 0.0),
+        vec2(0.0, 1.0),
+        vec2(1.0, 1.0)
+    );
 
-    output.position = float4(positions[vertexID], 0.0f, 1.0f);
-    output.uv = half2(uvs[vertexID]);
-    return output;
+    gl_Position = vec4(positions[gl_VertexID], 0.0, 1.0);
+    v_uv = uvs[gl_VertexID];
 }
