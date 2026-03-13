@@ -436,9 +436,11 @@ void main() {
 
     // Pixel size for anti-aliasing (y-dominant for aspect)
 //    float pixelSize = 2.0 / resolution.y;
+    float pixelSize = 2.0 / resolution.y;
 
     // Slightly expanded threshold for smoother AA
-    if (shapeDistance < 0.005) {
+    // if (shapeDistance < 0.005) {
+    if (shapeDistance < pixelSize) {
         float normalizedDepth = -shapeDistance * logicalResolution.y;
 
         // Refraction shift factor
@@ -521,7 +523,8 @@ void main() {
     }
 
     // Boundary anti-aliasing (smoothstep blend)
-    outputColor = mix(outputColor, vec4(0.0), smoothstep(-0.01, 0.005, shapeDistance));
+    // outputColor = mix(outputColor, vec4(0.0), smoothstep(-0.01, 0.005, shapeDistance));
+    outputColor = mix(outputColor, vec4(0.0), smoothstep(0.0, pixelSize, shapeDistance));
 
     fragColor = outputColor;
 }
