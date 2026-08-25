@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LiquidGlass Demo</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #fff;
+    }
+    #container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+    }
+    #bg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    #gl {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="container">
+  <canvas id="bg"></canvas>
+  <canvas id="gl"></canvas>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// Background canvas — macOS Tahoe wallpaper
+// ---------------------------------------------------------------------------
+
+const W = window.innerWidth, H = window.innerHeight;
+const dpr = window.devicePixelRatio || 1;
+
+const bgCanvas = document.getElementById('bg');
+bgCanvas.width  = W * dpr;
+bgCanvas.height = H * dpr;
+const ctx = bgCanvas.getContext('2d');
+ctx.scale(dpr, dpr);
+
+// ---------------------------------------------------------------------------
+// WebGL2 (async — loads shaders from source files)
+// ---------------------------------------------------------------------------
+
+(async () => {
+
+const [VERT_SRC, FRAG_SRC, bgImg] = await Promise.all([
+    fetch('Sources/LiquidGlassKit/LiquidGlassVertex.vert').then(r => r.text()),
+    fetch('Sources/LiquidGlassKit/LiquidGlassFragment.frag').then(r => r.text()),
+    new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = 'https://512pixels.net/downloads/macos-wallpapers-6k/26-Tahoe-Light-6K.png';
+    }),
+]);
+
+ctx.drawImage(bgImg, 0, 0, W, H);
+
+// ---------------------------------------------------------------------------
+// WebGL2 setup
+// ---------------------------------------------------------------------------
+
+const glCanvas = document.getElementById('gl');
+glCanvas.width  = W * dpr;
+glCanvas.height = H * dpr;
+const gl = glCanvas.getContext('webgl2', { alpha: true, premultipliedAlpha: false });
+if (!gl) { alert('WebGL2 not supported'); }
+
+function compileShader(type, src) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(s));
+    }
+    return s;
+}
+
+const prog = gl.createProgram();
+gl.attachShader(prog, compileShader(gl.VERTEX_SHADER,   VERT_SRC));
+gl.attachShader(prog, compileShader(gl.FRAGMENT_SHADER, FRAG_SRC));
+gl.linkProgram(prog);
+if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    throw new Error(gl.getProgramInfoLog(prog));
+}
+gl.useProgram(prog);
+
+// Empty VAO (gl_VertexID needs no attributes)
+const vao = gl.createVertexArray();
+gl.bindVertexArray(vao);
+
+// Background texture
+const bgTex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, bgTex);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+// Temporarily at 1.0 (full-res) to make the grid visible through the glass.
+// Set back to 0.2 to match backgroundTextureScaleCoefficient from the regular preset.
+const bgTexScale = 1.0;
+const bgTexCanvas = document.createElement('canvas');
+bgTexCanvas.width  = Math.round(W * dpr * bgTexScale);
+bgTexCanvas.height = Math.round(H * dpr * bgTexScale);
+bgTexCanvas.getContext('2d').drawImage(bgCanvas, 0, 0, bgTexCanvas.width, bgTexCanvas.height);
+
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, bgTexCanvas);
+gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+
+// Uniform locations
+const U = {};
+for (const name of [
+    'resolution', 'contentsScale', 'touchPoint', 'shapeMergeSmoothness',
+    'cornerRadius', 'cornerRoundnessExponent', 'materialTint',
+    'glassThickness', 'refractiveIndex', 'dispersionStrength',
+    'fresnelDistanceRange', 'fresnelIntensity', 'fresnelEdgeSharpness',
+    'glareDistanceRange', 'glareAngleConvergence', 'glareOppositeSideBias',
+    'glareIntensity', 'glareEdgeSharpness', 'glareDirectionOffset',
+    'rectangleCount', 'background',
+]) {
+    U[name] = gl.getUniformLocation(prog, name);
+}
+const rectLocs = Array.from({ length: 16 }, (_, i) => gl.getUniformLocation(prog, `rectangles[${i}]`));
+
+// Static uniforms — "regular" preset from LiquidGlass.swift
+gl.uniform1i(U['background'], 0);
+gl.uniform1f(U['contentsScale'],          dpr);
+gl.uniform1f(U['glassThickness'],         10.0);
+gl.uniform1f(U['refractiveIndex'],        1.5);
+gl.uniform1f(U['dispersionStrength'],     5.0);
+gl.uniform1f(U['fresnelDistanceRange'],   70.0);
+gl.uniform1f(U['fresnelIntensity'],       0.0);
+gl.uniform1f(U['fresnelEdgeSharpness'],   0.0);
+gl.uniform1f(U['glareDistanceRange'],     30.0);
+gl.uniform1f(U['glareAngleConvergence'],  0.1);
+gl.uniform1f(U['glareOppositeSideBias'],  1.0);
+gl.uniform1f(U['glareIntensity'],         0.1);
+gl.uniform1f(U['glareEdgeSharpness'],    -0.15);
+gl.uniform1f(U['glareDirectionOffset'],  -Math.PI / 4);
+// Light mode tint (rgba 0.902, 0.951, 1.0, 0.8)
+gl.uniform4f(U['materialTint'],           0.902, 0.951, 1.0, 0.8);
+gl.uniform1f(U['cornerRoundnessExponent'], 2.0);  // squircle — matches iOS .continuous corner curve
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+// Two pills: one static, one follows the mouse
+const pill = { x: Math.round((W - 280) / 2), y: Math.round((H - 60) / 2), w: 280, h: 60, r: 30 };
+const cursor = { x: W / 2, y: H / 2 };
+
+document.getElementById('container').addEventListener('mousemove', e => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    cursor.x = e.clientX - rect.left;
+    cursor.y = H - (e.clientY - rect.top);
+});
+
+// ---------------------------------------------------------------------------
+// Render loop
+// ---------------------------------------------------------------------------
+
+function render() {
+    gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, bgTex);
+
+    gl.uniform2f(U['resolution'], W * dpr, H * dpr);
+    gl.uniform2f(U['touchPoint'], cursor.x, cursor.y);
+
+    gl.uniform1f(U['shapeMergeSmoothness'], 0.2 * pill.h / H);
+
+    // Cursor pill — W×20, height 20, centered on cursor
+    const cpW = pill.h, cpH = pill.h;
+    const cpX = cursor.x - cpW / 2;
+    const cpY = cursor.y - cpH / 2;
+
+    gl.uniform1f(U['cornerRadius'], pill.r);
+    gl.uniform1i(U['rectangleCount'], 2);
+    gl.uniform4f(rectLocs[0], pill.x, pill.y, pill.w, pill.h);
+    gl.uniform4f(rectLocs[1], cpX, cpY, cpW, cpH);
+    for (let i = 2; i < 16; i++) gl.uniform4f(rectLocs[i], 0, 0, 0, 0);
+
+    gl.bindVertexArray(vao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    requestAnimationFrame(render);
+}
+
+render();
+
+})();
+</script>
+</body>
+</html>
